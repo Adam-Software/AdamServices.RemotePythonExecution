@@ -1,0 +1,27 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <Nullable>disable</Nullable>
+    <Version>0.0.3</Version>
+    <IsPackable>false</IsPackable>
+    <Title>$(SolutionName)</Title>
+    <Authors>vertigra</Authors>
+    <Product>$(SolutionName)</Product>
+    <DebugType>embedded</DebugType>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\RemotePythonExecution.Interface\RemotePythonExecution.Interface.csproj" />
+    <ProjectReference Include="..\RemotePythonExecution.Services\RemotePythonExecution.Services.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Update="appsettings.json">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </None>
+  </ItemGroup>
+  
+</Project>
