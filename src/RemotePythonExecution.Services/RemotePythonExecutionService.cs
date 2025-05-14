@@ -19,14 +19,17 @@ namespace RemotePythonExecution.Services
     {
         #region Services
 
-        private readonly ILogger<RemotePythonExecutionService> mLoggerService;
+        private readonly ILogger<RemotePythonExecutionService> mLogger;
 
         #endregion
 
         #region Var
 
         private readonly TcpNETServer mTcpNetServer;
-        private Process mProcess;
+        private Process mProcess = new()
+        {
+            
+        };
         private bool mIsOutputEnded = false;
         private bool mIsProcessEnded = false;
         public ConnectionTcpServer CurrentConnection = null;
@@ -44,10 +47,15 @@ namespace RemotePythonExecution.Services
 
         public RemotePythonExecutionService(IServiceProvider serviceProvider) 
         {
-            mLoggerService = serviceProvider.GetRequiredService<ILogger<RemotePythonExecutionService>>();
+            mLogger = serviceProvider.GetRequiredService<ILogger<RemotePythonExecutionService>>();
 
             ParamsTcpServer paramsTcpServer = new(18000, cEndOfLineCharster, connectionSuccessString: cConnectionSuccessString);
             mTcpNetServer = new TcpNETServer(paramsTcpServer);
+            mTcpNetServer.StartAsync();
+
+            Subscribe();
+
+            mLogger.LogInformation("Load RemotePythonExecutionService ~");
         }
 
         #region Subscribe/Unsubscribe
@@ -81,32 +89,45 @@ namespace RemotePythonExecution.Services
 
             if (connectionEvent == ConnectionEventType.Connected)
             {
+                mLogger.LogInformation("Client connected. Connection id: {ConnectionId}", args.Connection.ConnectionId);
                 //if the process is running, we reply that we are busy and disconnect.
-                if (!mProcess.HasExited)
-                {
-                    mTcpNetServer.SendToConnectionAsync("Service is busy", args.Connection);
-                    mTcpNetServer.DisconnectConnectionAsync(args.Connection);
 
-                    return;
+                try
+                {
+                    if(!mIsProcessEnded) 
+                    //if (!mProcess.HasExited)
+                    {
+                        mTcpNetServer.SendToConnectionAsync("Service is busy", args.Connection);
+                        mTcpNetServer.DisconnectConnectionAsync(args.Connection);
+
+                        return;
+                    }
+                }
+                catch (Exception ex) 
+                {
+                    mLogger.LogError("{error}", ex);  
+                }
+            }
+
+            if (connectionEvent == ConnectionEventType.Disconnect)
+            {
+                mLogger.LogInformation("Client disconnected. Connection id: {ConnectionId}", args.Connection.ConnectionId);
+
+                if (CurrentConnection != null)
+                {
+                    CurrentConnection = null;
+
+                    mIsOutputEnded = true;
+                    mIsProcessEnded = true;
                 }
 
-                if (connectionEvent == ConnectionEventType.Disconnect)
-                {                    
-                    if (CurrentConnection != null)
-                    {
-                        CurrentConnection = null;
+                if (!mIsProcessEnded)
+                //if (!mProcess.HasExited)
+                {
+                    mProcess.CancelErrorRead();
+                    mProcess.CancelOutputRead();
 
-                        mIsOutputEnded = true;
-                        mIsProcessEnded = true;
-                    }
-
-                    if (!mProcess.HasExited)
-                    {
-                        mProcess.CancelErrorRead();
-                        mProcess.CancelOutputRead();
-
-                        mProcess.Close();
-                    }
+                    mProcess.Close();
                 }
             }
         }
