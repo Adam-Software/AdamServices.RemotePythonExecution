@@ -127,26 +127,26 @@ namespace RemotePythonExecution.Services
                 //если получаем исходный код, записываем в файл и запускаем процесс
                 if (jsonMessage.MessageType == "source_code")
                 {
-                    mLogger.LogInformation("Source сode Receive");
+                    //mLogger.LogInformation("Source сode Receive");
 
                     if (!string.IsNullOrEmpty(jsonMessage.Code))
                     {
                         string code = jsonMessage.Code;
                         File.WriteAllText("C:\\Users\\Professional\\Downloads\\python-3.13.0-embed-amd64\\test2.py", code);
-                        StartProcess(false);
+                        Task.Run(() => StartProcess(false));
                     }
                 }
 
                 //если получаем исходный код, записываем в файл и запускаем процесс
                 if (jsonMessage.MessageType == "debug_source_code")
                 {
-                    mLogger.LogInformation("Source сode Receive");
+                    //mLogger.LogInformation("Source сode Receive");
 
                     if (!string.IsNullOrEmpty(jsonMessage.Code))
                     {
                         string code = jsonMessage.Code;
                         File.WriteAllText("C:\\Users\\Professional\\Downloads\\python-3.13.0-embed-amd64\\test2.py", code);
-                        StartProcess(true);
+                        Task.Run(() => StartProcess(true));
                     }
                 }
 
