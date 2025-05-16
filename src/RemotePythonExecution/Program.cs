@@ -26,7 +26,7 @@ namespace RemotePythonExecution
 
                 .ConfigureServices((context, services) =>
                 {
-                    //services.AddAdamArgumentsParserTransient<ArgumentService>(args);
+                    services.AddAdamDefaultArgumentsParser(args);
 
                     AppSettingService options = new();
                     context.Configuration.GetRequiredSection("AppSettingsOptions").Bind(options);
