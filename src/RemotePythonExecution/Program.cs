@@ -28,9 +28,9 @@ namespace RemotePythonExecution
                 {
                     //services.AddAdamArgumentsParserTransient<ArgumentService>(args);
 
-                    //SettingsService options = new();
-                    //context.Configuration.GetRequiredSection("AppSettingsOptions").Bind(options);
-                    //services.AddSingleton<ISettingsService>(options);
+                    AppSettingService options = new();
+                    context.Configuration.GetRequiredSection("AppSettingsOptions").Bind(options);
+                    services.AddSingleton<IAppSettingService>(options);
 
                     services.AddLogging(loggingBuilder =>
                     {
@@ -49,6 +49,7 @@ namespace RemotePythonExecution
 
             host.UseAdamServiceFileCreator(projectType: ProjectType.DotnetProject);
             await host.ParseAndRunAsync();
+
         }
     }
 }

@@ -2,12 +2,13 @@
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using PHS.Networking.Enums;
+using RemotePythonExecution.Interface;
+using RemotePythonExecution.Interface.IAppSettingsServiceDependency;
 using RemotePythonExecution.Interface.RemotePythonExecutionServiceDependency.JsonModel;
 using System;
-using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
-using System.Linq;
+using System.Runtime.InteropServices;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
@@ -22,6 +23,7 @@ namespace RemotePythonExecution.Services
         #region Services
 
         private readonly ILogger<RemotePythonExecutionService> mLogger;
+        private readonly IAppSettingService mAppSettingService;
 
         #endregion
 
@@ -32,6 +34,10 @@ namespace RemotePythonExecution.Services
         private bool mIsOutputEnded = false;
         private bool mIsProcessEnded = false;
         public ConnectionTcpServer CurrentConnection = null;
+
+        private string InterpreterPath = "";
+        private string WorkingDirrectoryPath = "";
+        private string SourceCodeSavePaths = "";
 
         #endregion
 
@@ -46,6 +52,7 @@ namespace RemotePythonExecution.Services
         public RemotePythonExecutionService(IServiceProvider serviceProvider) 
         {
             mLogger = serviceProvider.GetRequiredService<ILogger<RemotePythonExecutionService>>();
+            mAppSettingService = serviceProvider.GetRequiredService<IAppSettingService>();
 
             ParamsTcpServer paramsTcpServer = new(19000, cEndOfLineCharster);
             mTcpNetServer = new TcpNETServer(paramsTcpServer);
@@ -54,6 +61,23 @@ namespace RemotePythonExecution.Services
             Subscribe();
 
             mLogger.LogInformation("Load RemotePythonExecutionService ~");
+
+            SetPath();
+        }
+
+        private void SetPath()
+        {
+            if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+            {
+                SourceCodeSavePaths = mAppSettingService.SourceCodeSavePaths.Windows;
+                InterpreterPath = mAppSettingService.PythonPaths.InterpreterPath.Windows;
+                WorkingDirrectoryPath = mAppSettingService.PythonPaths.WorkingDirrectoryPath.Windows;
+                return;
+            }
+
+            SourceCodeSavePaths = mAppSettingService.SourceCodeSavePaths.Linux;
+            InterpreterPath = mAppSettingService.PythonPaths.InterpreterPath.Linux;
+            WorkingDirrectoryPath = mAppSettingService.PythonPaths.WorkingDirrectoryPath.Linux;
         }
 
         #region Subscribe/Unsubscribe
@@ -65,7 +89,6 @@ namespace RemotePythonExecution.Services
             mTcpNetServer.ErrorEvent += ErrorEvent;
         }
 
-
         private void UnSubscribe()
         {
             mTcpNetServer.MessageEvent -= MessageEvent;
@@ -74,7 +97,6 @@ namespace RemotePythonExecution.Services
         }
 
         #endregion
-
 
         #region Events
 
@@ -117,47 +139,45 @@ namespace RemotePythonExecution.Services
         private void MessageEvent(object sender, TcpMessageServerEventArgs args)
         {
             CurrentConnection = args.Connection;
-            var messageEvent = args.MessageEventType;
+            MessageEventType messageEvent = args.MessageEventType;
 
-            //получаем исходный код или управляющие символы
-            if (messageEvent == MessageEventType.Receive)
+            if (messageEvent != MessageEventType.Receive)
+                return;
+
+            var jsonMessage = JsonSerializer.Deserialize<ReceivedMessage>(args.Message);
+
+            switch (jsonMessage.MessageType)
             {
-                var jsonMessage = JsonSerializer.Deserialize<ReceivedMessage>(args.Message);
-
-                //если получаем исходный код, записываем в файл и запускаем процесс
-                if (jsonMessage.MessageType == "source_code")
-                {
-                    //mLogger.LogInformation("Source сode Receive");
-
-                    if (!string.IsNullOrEmpty(jsonMessage.Code))
+                case "source_code":
                     {
+                        if (string.IsNullOrEmpty(jsonMessage.Code))
+                            return;
+
                         string code = jsonMessage.Code;
-                        File.WriteAllText("C:\\Users\\Professional\\Downloads\\python-3.13.0-embed-amd64\\test2.py", code);
-                        Task.Run(() => StartProcess(false));
+
+                        SaveCodeAndStartProcess(code, false);
                     }
-                }
 
-                //если получаем исходный код, записываем в файл и запускаем процесс
-                if (jsonMessage.MessageType == "debug_source_code")
-                {
-                    //mLogger.LogInformation("Source сode Receive");
-
-                    if (!string.IsNullOrEmpty(jsonMessage.Code))
+                    break;
+                case "debug_source_code":
                     {
+                        if (string.IsNullOrEmpty(jsonMessage.Code))
+                            return;
+                        
                         string code = jsonMessage.Code;
-                        File.WriteAllText("C:\\Users\\Professional\\Downloads\\python-3.13.0-embed-amd64\\test2.py", code);
-                        Task.Run(() => StartProcess(true));
+                        SaveCodeAndStartProcess(code, true);;
                     }
-                }
 
-                //записывает в запущенный процесс управляющие символы
-                if (jsonMessage.MessageType == "control_characters")
-                {
-                    mLogger.LogInformation("Сontrol characters Receive");
-
-                    if (!string.IsNullOrEmpty(jsonMessage.ControlCharacters))
+                    break;
+                case "control_characters":
+                    {
+                        if (string.IsNullOrEmpty(jsonMessage.ControlCharacters))
+                            return;
+                        
                         mProcess.StandardInput.WriteLine(jsonMessage.ControlCharacters);
-                }
+                    }
+
+                    break;
             }
         }
 
@@ -193,16 +213,23 @@ namespace RemotePythonExecution.Services
 
         #region Private methods
 
+        private void SaveCodeAndStartProcess(string code, bool withDebug)
+        {
+            File.WriteAllText(SourceCodeSavePaths, code);
+            Task.Run(() => StartProcess(withDebug: withDebug));
+        }
+
         private void StartProcess(bool withDebug = false)
         {
-            string arg = string.Format("-u -m test2");
+            string arg = string.Format($"-u -m {Path.GetFileNameWithoutExtension(SourceCodeSavePaths)}");
+            
             if (withDebug)
-                arg = string.Format("-u -m pdb test2.py");
+                arg = string.Format($"-u -m pdb {SourceCodeSavePaths}");
 
             ProcessStartInfo proccesInfo = new()
             {
-                FileName = "C:\\Users\\Professional\\Downloads\\python-3.13.0-embed-amd64\\python.exe",
-                WorkingDirectory = "C:\\Users\\Professional\\Downloads\\python-3.13.0-embed-amd64\\",
+                FileName = InterpreterPath, 
+                WorkingDirectory = WorkingDirrectoryPath,
                 Arguments = arg,
                 UseShellExecute = false,
                 CreateNoWindow = true,
