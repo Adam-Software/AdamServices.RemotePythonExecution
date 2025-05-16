@@ -1,0 +1,73 @@
+# This workflow will build a .NET project
+# For more information see: https://docs.github.com/en/actions/automating-builds-and-tests/building-and-testing-net
+
+name: .NET Build And Publish Release
+
+on:
+  push:
+    #branches: 
+    #  - "**"
+    tags: 
+      - "v.[0-9]+.[0-9]+.[0-9]+"
+  #pull_request:
+  #  branches: 
+  #    - "**"
+env:
+  VERSION: 1.0.0
+  GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+  PROJECT_NAME: RemotePythonExecution
+  OUTPUT_ARM64_DIR: publish/arm64
+  OUTPUT_WIN64_DIR: publish/win64
+  
+jobs:
+  build:
+
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Set Version Variable
+      if: ${{ github.ref_type == 'tag' }}
+      env:
+        TAG: ${{ github.ref_name }}
+      run: echo "VERSION=${TAG#v.}" >> $GITHUB_ENV
+      
+    - name: Setup .NET
+      uses: actions/setup-dotnet@v4
+      with:
+        dotnet-version: 8.0.x
+
+    - name: Create service_info.json file
+      run: |
+        cd src/$PROJECT_NAME
+        dotnet run [--environment Development] --version
+        
+    - name: Publish
+      run: | 
+        dotnet publish src/$PROJECT_NAME --output $OUTPUT_ARM64_DIR -c Release --self-contained true --runtime linux-arm64 -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -p:Version=$VERSION 
+        dotnet publish src/$PROJECT_NAME --output $OUTPUT_WIN64_DIR -c Release --self-contained true --runtime win-x64 -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -p:Version=$VERSION 
+  
+    - name: Zip arm64 release
+      uses: vimtor/action-zip@v1.2
+      with:
+        files: "${{ env.OUTPUT_ARM64_DIR }} service_info.json" 
+        recursive: true
+        dest: "${{ env.PROJECT_NAME }}.arm64.portable.zip"
+    
+    - name: Zip win64 release
+      uses: vimtor/action-zip@v1.2
+      with:
+        files: "${{ env.OUTPUT_WIN64_DIR }} service_info.json"
+        recursive: true
+        dest: "${{ env.PROJECT_NAME }}.win64.portable.zip"
+
+    - name: Publish Release
+      uses: "slord399/action-automatic-releases@v1.0.1"
+      with:
+        title: "Release v.${{ env.VERSION }}"
+        repo_token: "${{ env.GITHUB_TOKEN }}"
+        automatic_release_tag: "v.${{ env.VERSION }}"
+        prerelease: false
+        files: |
+            *.zip
