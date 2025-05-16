@@ -1,0 +1,19 @@
+{
+  "services": {
+    "name": "RemotePythonExecution",
+    "version": "0.0.1",
+    "projectType": "DotnetProject",
+    "dependencies": []
+  },
+  "executionOptions": {
+    "arguments": ""
+  },
+  "compilerOptions": {
+    "serviceProjectPath": "",
+    "serviceOutputPath": "",
+    "serviceBuildPath": ""
+  },
+  "systemd": {
+    "serviceFilePath": ""
+  }
+}

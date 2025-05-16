@@ -165,7 +165,7 @@ namespace RemotePythonExecution.Services
                             return;
                         
                         string code = jsonMessage.Code;
-                        SaveCodeAndStartProcess(code, true);;
+                        SaveCodeAndStartProcess(code, true);
                     }
 
                     break;
