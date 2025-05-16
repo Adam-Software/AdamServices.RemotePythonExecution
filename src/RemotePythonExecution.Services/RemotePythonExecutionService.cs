@@ -54,7 +54,7 @@ namespace RemotePythonExecution.Services
             mLogger = serviceProvider.GetRequiredService<ILogger<RemotePythonExecutionService>>();
             mAppSettingService = serviceProvider.GetRequiredService<IAppSettingService>();
 
-            ParamsTcpServer paramsTcpServer = new(19000, cEndOfLineCharster);
+            ParamsTcpServer paramsTcpServer = new(19000, cEndOfLineCharster, pingIntervalSec:5);
             mTcpNetServer = new TcpNETServer(paramsTcpServer);
             mTcpNetServer.StartAsync();
 
