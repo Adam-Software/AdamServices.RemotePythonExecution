@@ -4,8 +4,10 @@ using Microsoft.Extensions.Logging;
 using RemotePythonExecution.Interface;
 using RemotePythonExecution.Interface.RemotePythonExecutionServiceDependency.JsonModel;
 using System;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
+using System.Linq;
 using System.Runtime.InteropServices;
 using System.Text.Json;
 using System.Threading;
@@ -93,7 +95,7 @@ namespace RemotePythonExecution.Services
         #region Events
 
         private void ClientConnected(object sender, ConnectionEventArgs e)
-        {
+        {   
             mLogger.LogInformation("Client connected. Connection id: {Guid}", e.Client.Guid);
             CurrentConnectionGuid = e.Client.Guid;
 
@@ -118,42 +120,44 @@ namespace RemotePythonExecution.Services
         }
 
         private void MessageReceived(object sender, MessageReceivedEventArgs e)
-        { 
-            var message = System.Text.Encoding.Default.GetString(e.Data);
-            var jsonMessage = JsonSerializer.Deserialize<ReceivedMessage>(message);
+        {
+            Dictionary<string, object> metadata = e.Metadata;
 
-            switch (jsonMessage.MessageType)
+            foreach(var key in metadata.Keys)
             {
-                case "source_code":
-                    {
-                        if (string.IsNullOrEmpty(jsonMessage.Code))
-                            return;
+                switch (key)
+                {
+                    case "source_code":
+                        {
+                            var code = metadata[key].ToString();
+                            
+                            if (string.IsNullOrEmpty(code))
+                                return;
 
-                        string code = jsonMessage.Code;
+                            SaveCodeAndStartProcess(code, false);
+                            break;
+                        }
 
-                        SaveCodeAndStartProcess(code, false);
-                    }
+                    case "debug_source_code":
+                        {
+                            string code = metadata[key].ToString();
+                            if (string.IsNullOrEmpty(code))
+                                return;
 
-                    break;
-                case "debug_source_code":
-                    {
-                        if (string.IsNullOrEmpty(jsonMessage.Code))
-                            return;
+                            SaveCodeAndStartProcess(code, true);
+                            break;
+                        }
 
-                        string code = jsonMessage.Code;
-                        SaveCodeAndStartProcess(code, true);
-                    }
+                    case "control_characters":
+                        {
+                            string characters = metadata[key].ToString();
+                            if (string.IsNullOrEmpty(characters))
+                                return;
 
-                    break;
-                case "control_characters":
-                    {
-                        if (string.IsNullOrEmpty(jsonMessage.ControlCharacters))
-                            return;
-
-                        mProcess.StandardInput.WriteLine(jsonMessage.ControlCharacters);
-                    }
-
-                    break;
+                            mProcess?.StandardInput?.WriteLine(characters);
+                            break;  
+                        }
+                }
             }
         }
 
@@ -184,7 +188,7 @@ namespace RemotePythonExecution.Services
 
                     try
                     {
-                        if (!mProcess.HasExited)
+                        if (!mProcess?.HasExited ?? false)
                         {
                             mProcess.CancelErrorRead();
                             mProcess.CancelOutputRead();
@@ -200,6 +204,8 @@ namespace RemotePythonExecution.Services
 
                     if (mTcpServer.IsClientConnected(CurrentConnectionGuid))
                         await mTcpServer.DisconnectClientAsync(CurrentConnectionGuid, MessageStatus.Removed, true, stoppingToken);
+
+                    CurrentConnectionGuid = Guid.Empty;
                 }
             }
         }
