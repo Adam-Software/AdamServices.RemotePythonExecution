@@ -3,7 +3,6 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using PHS.Networking.Enums;
 using RemotePythonExecution.Interface;
-using RemotePythonExecution.Interface.IAppSettingsServiceDependency;
 using RemotePythonExecution.Interface.RemotePythonExecutionServiceDependency.JsonModel;
 using System;
 using System.Diagnostics;
@@ -54,9 +53,10 @@ namespace RemotePythonExecution.Services
             mLogger = serviceProvider.GetRequiredService<ILogger<RemotePythonExecutionService>>();
             mAppSettingService = serviceProvider.GetRequiredService<IAppSettingService>();
 
-            ParamsTcpServer paramsTcpServer = new(19000, cEndOfLineCharster, pingIntervalSec:5);
+            ParamsTcpServer paramsTcpServer = new(19000, cEndOfLineCharster, pingIntervalSec:2);
             mTcpNetServer = new TcpNETServer(paramsTcpServer);
             mTcpNetServer.StartAsync();
+            
 
             Subscribe();
 
