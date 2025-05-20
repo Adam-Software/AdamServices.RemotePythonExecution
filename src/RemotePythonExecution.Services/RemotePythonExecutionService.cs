@@ -1,7 +1,6 @@
 ﻿using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
-using PHS.Networking.Enums;
 using RemotePythonExecution.Interface;
 using RemotePythonExecution.Interface.RemotePythonExecutionServiceDependency.JsonModel;
 using System;
@@ -11,9 +10,7 @@ using System.Runtime.InteropServices;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
-using Tcp.NET.Server;
-using Tcp.NET.Server.Events.Args;
-using Tcp.NET.Server.Models;
+using WatsonTcp;
 
 namespace RemotePythonExecution.Services
 {
@@ -28,11 +25,11 @@ namespace RemotePythonExecution.Services
 
         #region Var
 
-        private readonly TcpNETServer mTcpNetServer;
+        private readonly WatsonTcpServer mTcpServer;
         private Process mProcess;
         private bool mIsOutputEnded = false;
         private bool mIsProcessEnded = false;
-        public ConnectionTcpServer CurrentConnection = null;
+        public Guid? CurrentConnectionGuid = null;
 
         private string InterpreterPath = "";
         private string WorkingDirrectoryPath = "";
@@ -53,12 +50,12 @@ namespace RemotePythonExecution.Services
             mLogger = serviceProvider.GetRequiredService<ILogger<RemotePythonExecutionService>>();
             mAppSettingService = serviceProvider.GetRequiredService<IAppSettingService>();
 
-            ParamsTcpServer paramsTcpServer = new(19000, cEndOfLineCharster, pingIntervalSec:2);
-            mTcpNetServer = new TcpNETServer(paramsTcpServer);
-            mTcpNetServer.StartAsync();
-            
-
+            //ParamsTcpServer paramsTcpServer = new(19000, cEndOfLineCharster, pingIntervalSec:2);
+            mTcpServer = new WatsonTcpServer("0.0.0.0", 19000);
+        
             Subscribe();
+
+            mTcpServer.Start();
 
             mLogger.LogInformation("Load RemotePythonExecutionService ~");
 
@@ -84,67 +81,67 @@ namespace RemotePythonExecution.Services
 
         private void Subscribe()
         {
-            mTcpNetServer.MessageEvent += MessageEvent;
-            mTcpNetServer.ConnectionEvent += ConnectionEvent;
-            mTcpNetServer.ErrorEvent += ErrorEvent;
+            mTcpServer.Events.ClientConnected += ClientConnected;
+            mTcpServer.Events.ClientDisconnected += ClientDisconnected;
+            mTcpServer.Events.MessageReceived += MessageReceived;
+            mTcpServer.Events.ExceptionEncountered += ExceptionEncountered;
         }
 
         private void UnSubscribe()
         {
-            mTcpNetServer.MessageEvent -= MessageEvent;
-            mTcpNetServer.ConnectionEvent -= ConnectionEvent;
-            mTcpNetServer.ErrorEvent -= ErrorEvent;
+            mTcpServer.Events.ClientConnected -= ClientConnected;
+            mTcpServer.Events.ClientDisconnected -= ClientDisconnected;
+            mTcpServer.Events.MessageReceived -= MessageReceived;
+            mTcpServer.Events.ExceptionEncountered -= ExceptionEncountered; 
         }
 
         #endregion
 
         #region Events
 
-        private void ConnectionEvent(object sender, TcpConnectionServerEventArgs args)
+        private void ClientConnected(object sender, ConnectionEventArgs e)
         {
-            ConnectionEventType connectionEvent = args.ConnectionEventType;
+            mLogger.LogInformation("Client connected. Connection id: {Guid}", e.Client.Guid);
 
-            if (connectionEvent == ConnectionEventType.Connected)
-            {
-                mLogger.LogInformation("Client connected. Connection id: {ConnectionId}", args.Connection.ConnectionId);
-
-                mIsOutputEnded = false;
-                mIsProcessEnded = false;
-            }
-
-            if (connectionEvent == ConnectionEventType.Disconnect)
-            {
-                mLogger.LogInformation("Client disconnected. Connection id: {ConnectionId}", args.Connection.ConnectionId);
-
-                try
-                {
-                    if (!mProcess.HasExited)
-                    {
-                        mIsOutputEnded = true;
-                        mIsProcessEnded = true;
-
-                        mProcess.CancelErrorRead();
-                        mProcess.CancelOutputRead();
-
-                        mProcess.Close();
-                    }
-                }
-                catch (Exception ex) 
-                {
-                    mLogger.LogError("{error}", ex.Message);
-                }
-            }
+            mIsOutputEnded = false;
+            mIsProcessEnded = false;
         }
 
-        private void MessageEvent(object sender, TcpMessageServerEventArgs args)
+        private void ClientDisconnected(object sender, DisconnectionEventArgs e)
         {
-            CurrentConnection = args.Connection;
-            MessageEventType messageEvent = args.MessageEventType;
+            mLogger.LogInformation("Client disconnected. Connection id: {Guid}", e.Client.Guid);
 
-            if (messageEvent != MessageEventType.Receive)
-                return;
+            try
+            {
+                if (!mProcess.HasExited)
+                {
+                    mIsOutputEnded = true;
+                    mIsProcessEnded = true;
 
-            var jsonMessage = JsonSerializer.Deserialize<ReceivedMessage>(args.Message);
+                    mProcess.CancelErrorRead();
+                    mProcess.CancelOutputRead();
+
+                    mProcess.Close();
+                }
+            }
+            catch (Exception ex)
+            {
+                mLogger.LogError("{error}", ex.Message);
+            }
+
+        }
+
+        private void ExceptionEncountered(object sender, ExceptionEventArgs e)
+        {
+            mLogger.LogError("Error happened {errorMessage}", e.Exception.Message);
+        }
+
+        private void MessageReceived(object sender, MessageReceivedEventArgs e)
+        {
+            CurrentConnectionGuid = e.Client.Guid;
+            
+            var message = System.Text.Encoding.Default.GetString(e.Data);
+            var jsonMessage = JsonSerializer.Deserialize<ReceivedMessage>(message);
 
             switch (jsonMessage.MessageType)
             {
@@ -163,7 +160,7 @@ namespace RemotePythonExecution.Services
                     {
                         if (string.IsNullOrEmpty(jsonMessage.Code))
                             return;
-                        
+
                         string code = jsonMessage.Code;
                         SaveCodeAndStartProcess(code, true);
                     }
@@ -173,7 +170,7 @@ namespace RemotePythonExecution.Services
                     {
                         if (string.IsNullOrEmpty(jsonMessage.ControlCharacters))
                             return;
-                        
+
                         mProcess.StandardInput.WriteLine(jsonMessage.ControlCharacters);
                     }
 
@@ -181,10 +178,6 @@ namespace RemotePythonExecution.Services
             }
         }
 
-        private void ErrorEvent(object sender, TcpErrorServerEventArgs args)
-        {
-            mLogger.LogError("Error happened {error}", args.Exception.Message);
-        }
         #endregion
 
         public override void Dispose()
@@ -196,6 +189,8 @@ namespace RemotePythonExecution.Services
 
         protected override async Task ExecuteAsync(CancellationToken stoppingToken)
         {
+
+
             while (!stoppingToken.IsCancellationRequested)
             {
                 while (mIsOutputEnded && mIsProcessEnded)
@@ -203,8 +198,8 @@ namespace RemotePythonExecution.Services
                     mIsOutputEnded = false;
                     mIsProcessEnded = false;
 
-                    await mTcpNetServer.DisconnectConnectionAsync(CurrentConnection, stoppingToken);
-                    CurrentConnection = null;
+                    await mTcpServer.DisconnectClientAsync((Guid)CurrentConnectionGuid,  MessageStatus.Removed, true, stoppingToken);
+                    CurrentConnectionGuid = null;
                 }
             }
         }
@@ -259,7 +254,7 @@ namespace RemotePythonExecution.Services
             {
                 try
                 {
-                    mTcpNetServer.SendToConnectionAsync(e.Data, CurrentConnection);
+                    mTcpServer.SendAsync((Guid)CurrentConnectionGuid, e.Data);
                     mIsOutputEnded = false;
                 }
                 catch
@@ -280,7 +275,7 @@ namespace RemotePythonExecution.Services
             {
                 try
                 {
-                    mTcpNetServer.SendToConnectionAsync(e.Data, CurrentConnection);
+                    mTcpServer.SendAsync((Guid) CurrentConnectionGuid, e.Data);
                     mLogger.LogDebug("{data}", e.Data);
                     mIsOutputEnded = false;
                 }
