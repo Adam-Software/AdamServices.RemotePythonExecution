@@ -2,14 +2,11 @@
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using RemotePythonExecution.Interface;
-using RemotePythonExecution.Interface.RemotePythonExecutionServiceDependency.JsonModel;
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
-using System.Linq;
 using System.Runtime.InteropServices;
-using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using WatsonTcp;
@@ -37,6 +34,8 @@ namespace RemotePythonExecution.Services
         private string WorkingDirrectoryPath = "";
         private string SourceCodeSavePaths = "";
 
+        private bool mIsDisposed;
+
         #endregion
 
         #region ~
@@ -46,31 +45,21 @@ namespace RemotePythonExecution.Services
             mLogger = serviceProvider.GetRequiredService<ILogger<RemotePythonExecutionService>>();
             mAppSettingService = serviceProvider.GetRequiredService<IAppSettingService>();
 
-            mTcpServer = new WatsonTcpServer("0.0.0.0", 19000);
+            string ip =mAppSettingService.ServerSettings.Ip;
+            int port =mAppSettingService.ServerSettings.Port;
+
+            mTcpServer = new WatsonTcpServer(ip, port);
         
             Subscribe();
 
             mTcpServer.Start();
 
-            mLogger.LogInformation("Load RemotePythonExecutionService ~");
-
             SetPath();
+
+            mLogger.LogInformation("Server runing on {ip}:{port}", ip, port);
         }
 
-        private void SetPath()
-        {
-            if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
-            {
-                SourceCodeSavePaths = mAppSettingService.SourceCodeSavePaths.Windows;
-                InterpreterPath = mAppSettingService.PythonPaths.InterpreterPath.Windows;
-                WorkingDirrectoryPath = mAppSettingService.PythonPaths.WorkingDirrectoryPath.Windows;
-                return;
-            }
-
-            SourceCodeSavePaths = mAppSettingService.SourceCodeSavePaths.Linux;
-            InterpreterPath = mAppSettingService.PythonPaths.InterpreterPath.Linux;
-            WorkingDirrectoryPath = mAppSettingService.PythonPaths.WorkingDirrectoryPath.Linux;
-        }
+        #endregion
 
         #region Subscribe/Unsubscribe
 
@@ -161,18 +150,60 @@ namespace RemotePythonExecution.Services
             }
         }
 
+        private void ProcessErrorDataReceived(object sender, DataReceivedEventArgs e)
+        {
+            if (!string.IsNullOrEmpty(e.Data))
+            {
+                try
+                {
+                    mTcpServer.SendAsync(CurrentConnectionGuid, e.Data);
+                    mIsOutputEnded = false;
+                }
+                catch (Exception exp)
+                {
+                    mLogger.LogError("Catch happened {exp}", exp);
+                    mIsOutputEnded = true;
+                }
+            }
+        }
+
+        private void ProcessOutputDataReceived(object sender, DataReceivedEventArgs e)
+        {
+            if (!string.IsNullOrEmpty(e.Data))
+            {
+                try
+                {
+                    mTcpServer.SendAsync(CurrentConnectionGuid, e.Data);
+                    mLogger.LogDebug("{data}", e.Data);
+                    mIsOutputEnded = false;
+                }
+                catch (Exception exp)
+                {
+                    mLogger.LogError("Catch happened {exp}", exp);
+                    mIsOutputEnded = true;
+                }
+            }
+            else
+            {
+                mLogger.LogDebug("Output ended happened");
+                mIsOutputEnded = true;
+            }
+        }
+
+        private void ProcessExited(object sender, EventArgs e)
+        {
+            mLogger.LogDebug("Process ended happened");
+            mIsProcessEnded = true;
+        }
+
         #endregion
+
+        #region Public methods
 
         public override void Dispose()
         {
-            UnSubscribe();
-            mProcess?.Close();
-            mProcess?.Dispose();
-
-            mTcpServer.DisconnectClientsAsync();
-            mTcpServer.Stop();
-            mTcpServer.Dispose();
-            mLogger.LogInformation("Service stop and dispose");
+            Dispose(true);
+            GC.SuppressFinalize(this);
 
             base.Dispose();
         }
@@ -201,7 +232,6 @@ namespace RemotePythonExecution.Services
                         mLogger.LogError("Error when procces close {error}", exception.Message);
                     }
                     
-
                     if (mTcpServer.IsClientConnected(CurrentConnectionGuid))
                         await mTcpServer.DisconnectClientAsync(CurrentConnectionGuid, MessageStatus.Removed, true, stoppingToken);
 
@@ -213,6 +243,21 @@ namespace RemotePythonExecution.Services
         #endregion
 
         #region Private methods
+
+        private void SetPath()
+        {
+            if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+            {
+                SourceCodeSavePaths = mAppSettingService.SourceCodeSavePaths.Windows;
+                InterpreterPath = mAppSettingService.PythonPaths.InterpreterPath.Windows;
+                WorkingDirrectoryPath = mAppSettingService.PythonPaths.WorkingDirrectoryPath.Windows;
+                return;
+            }
+
+            SourceCodeSavePaths = mAppSettingService.SourceCodeSavePaths.Linux;
+            InterpreterPath = mAppSettingService.PythonPaths.InterpreterPath.Linux;
+            WorkingDirrectoryPath = mAppSettingService.PythonPaths.WorkingDirrectoryPath.Linux;
+        }
 
         private void SaveCodeAndStartProcess(string code, bool withDebug)
         {
@@ -238,12 +283,12 @@ namespace RemotePythonExecution.Services
                 RedirectStandardError = true,
                 RedirectStandardInput = true,
             };
+
             mProcess = new()
             {
                 StartInfo = proccesInfo,
                 EnableRaisingEvents = true,
             };
-
 
             mProcess.Exited += ProcessExited;
             mProcess.OutputDataReceived += ProcessOutputDataReceived;
@@ -254,49 +299,24 @@ namespace RemotePythonExecution.Services
             mProcess.WaitForExit();
         }
 
-        private void ProcessErrorDataReceived(object sender, DataReceivedEventArgs e)
+        protected virtual void Dispose(bool disposing)
         {
-            if (!string.IsNullOrEmpty(e.Data))
+            if (!mIsDisposed)
             {
-                try
-                {
-                    mTcpServer.SendAsync(CurrentConnectionGuid, e.Data);
-                    mIsOutputEnded = false;
-                }
-                catch
-                {
-                    mIsOutputEnded = true;
-                }
-            }
-        }
+                mIsDisposed = true;
 
-        private void ProcessOutputDataReceived(object sender, DataReceivedEventArgs e)
-        {
-            if (!string.IsNullOrEmpty(e.Data))
-            {
-                try
+                if (disposing)
                 {
-                    mTcpServer.SendAsync(CurrentConnectionGuid, e.Data);
-                    mLogger.LogDebug("{data}", e.Data);
-                    mIsOutputEnded = false;
-                }
-                catch(Exception exp)
-                {
-                    mLogger.LogDebug("Catch happened {exp}", exp);
-                    mIsOutputEnded = true;
-                }
-            }
-            else
-            {
-                mLogger.LogDebug("Output ended happened");
-                mIsOutputEnded = true;
-            }
-        }
+                    UnSubscribe();
+                    mProcess?.Close();
+                    mProcess?.Dispose();
 
-        private void ProcessExited(object sender, EventArgs e)
-        {
-            mLogger.LogDebug("Process ended happened");
-            mIsProcessEnded = true;
+                    mTcpServer.DisconnectClientsAsync();
+                    mTcpServer.Stop();
+                    mTcpServer.Dispose();
+                    mLogger.LogInformation("Service stop and dispose");
+                }
+            }
         }
 
         #endregion
