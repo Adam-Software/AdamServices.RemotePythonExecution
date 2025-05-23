@@ -21,17 +21,16 @@ namespace RemotePythonExecution
                 .ConfigureAppConfiguration((context, config) =>
                 {
                     config.Sources.Clear();
-                    config.AddJsonFile("appsettings.json", optional: true, reloadOnChange: true);
+                    config.AddJsonFile("appsettings.json", optional: false, reloadOnChange: true);
                 })
 
                 .ConfigureServices((context, services) =>
                 {
                     services.AddAdamDefaultArgumentsParser(args);
 
-                    AppSettingService options = new();
-                    context.Configuration.GetRequiredSection("AppSettingsOptions").Bind(options);
-                    services.AddSingleton<IAppSettingService>(options);
-
+                    AppSettings options = new();
+                    services.Configure<AppSettings>(context.Configuration.GetRequiredSection(nameof(AppSettings)));
+                    
                     services.AddLogging(loggingBuilder =>
                     {
                         Logger logger = new LoggerConfiguration()

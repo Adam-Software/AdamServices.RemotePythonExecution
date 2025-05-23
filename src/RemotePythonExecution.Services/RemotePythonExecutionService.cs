@@ -1,6 +1,7 @@
 ﻿using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 using RemotePythonExecution.Interface;
 using System;
 using System.Collections.Generic;
@@ -18,7 +19,7 @@ namespace RemotePythonExecution.Services
         #region Services
 
         private readonly ILogger<RemotePythonExecutionService> mLogger;
-        private readonly IAppSettingService mAppSettingService;
+        private readonly IOptionsMonitor<AppSettings> mAppSettingsMonitor;
 
         #endregion
 
@@ -29,11 +30,6 @@ namespace RemotePythonExecution.Services
         private bool mIsOutputEnded = false;
         private bool mIsProcessEnded = false;
         public Guid CurrentConnectionGuid;
-
-        private string InterpreterPath = "";
-        private string WorkingDirrectoryPath = "";
-        private string SourceCodeSavePaths = "";
-
         private bool mIsDisposed;
 
         #endregion
@@ -43,18 +39,20 @@ namespace RemotePythonExecution.Services
         public RemotePythonExecutionService(IServiceProvider serviceProvider) 
         {
             mLogger = serviceProvider.GetRequiredService<ILogger<RemotePythonExecutionService>>();
-            mAppSettingService = serviceProvider.GetRequiredService<IAppSettingService>();
+            mAppSettingsMonitor = serviceProvider.GetRequiredService<IOptionsMonitor<AppSettings>>();
 
-            string ip =mAppSettingService.ServerSettings.Ip;
-            int port =mAppSettingService.ServerSettings.Port;
+
+            string ip = mAppSettingsMonitor.CurrentValue.ServerSettings.Ip;
+            int port = mAppSettingsMonitor.CurrentValue.ServerSettings.Port;
 
             mTcpServer = new WatsonTcpServer(ip, port);
+            mAppSettingsMonitor.OnChange(OnChangeSettings);
         
             Subscribe();
 
             mTcpServer.Start();
 
-            SetPath();
+            SetPath(mAppSettingsMonitor.CurrentValue);
 
             mLogger.LogInformation("Server runing on {ip}:{port}", ip, port);
         }
@@ -82,6 +80,10 @@ namespace RemotePythonExecution.Services
         #endregion
 
         #region Events
+        private void OnChangeSettings(AppSettings settings, string arg2)
+        {
+            SetPath(settings);
+        }
 
         private void ClientConnected(object sender, ConnectionEventArgs e)
         {   
@@ -167,13 +169,13 @@ namespace RemotePythonExecution.Services
             }
         }
 
-        private void ProcessOutputDataReceived(object sender, DataReceivedEventArgs e)
+        private async void ProcessOutputDataReceived(object sender, DataReceivedEventArgs e)
         {
-            if (!string.IsNullOrEmpty(e.Data))
+            if (!(e.Data == null))
             {
                 try
                 {
-                    mTcpServer.SendAsync(CurrentConnectionGuid, e.Data);
+                    await mTcpServer.SendAsync(CurrentConnectionGuid, e.Data, start: 0);
                     mLogger.LogDebug("{data}", e.Data);
                     mIsOutputEnded = false;
                 }
@@ -242,35 +244,91 @@ namespace RemotePythonExecution.Services
 
         #endregion
 
+
+        #region Private fields
+
+        private string mInterpreterPath = string.Empty;
+        private string InterpreterPath
+        {
+            get { return mInterpreterPath; }
+            set
+            {
+                if (string.IsNullOrEmpty(value))
+                    return;
+
+                if (value.Equals(mInterpreterPath))
+                    return;
+
+                mInterpreterPath = value;
+                mLogger.LogDebug("New path for {name} register with values {value}", nameof(InterpreterPath), InterpreterPath);
+            }
+        }
+
+        private string mWorkingDirrectoryPath = string.Empty;
+        private string WorkingDirrectoryPath
+        {
+            get { return mWorkingDirrectoryPath; }
+            set
+            {
+                if (string.IsNullOrEmpty(value))
+                    return;
+
+                if (value.Equals(mWorkingDirrectoryPath))
+                    return;
+
+                mWorkingDirrectoryPath = value;
+                mLogger.LogDebug("New path for {name} register with values {value}", nameof(WorkingDirrectoryPath), WorkingDirrectoryPath);
+            }
+        }
+
+        private string mSourceCodeSavePath = string.Empty;
+        private string SourceCodeSavePath
+        {
+            get { return mSourceCodeSavePath; }
+            set
+            {
+                if (string.IsNullOrEmpty(value))
+                    return;
+
+                if (value.Equals(mSourceCodeSavePath))
+                    return;
+
+                mSourceCodeSavePath = value;
+                mLogger.LogDebug("New path for {name} register with values {value}", nameof(SourceCodeSavePath), SourceCodeSavePath);
+            }
+
+        }
+
+        #endregion
         #region Private methods
 
-        private void SetPath()
+        private void SetPath(AppSettings appSettings)
         {
             if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
             {
-                SourceCodeSavePaths = mAppSettingService.SourceCodeSavePaths.Windows;
-                InterpreterPath = mAppSettingService.PythonPaths.InterpreterPath.Windows;
-                WorkingDirrectoryPath = mAppSettingService.PythonPaths.WorkingDirrectoryPath.Windows;
+                SourceCodeSavePath = appSettings.SourceCodeSavePath.Windows;
+                InterpreterPath = appSettings.PythonPaths.InterpreterPath.Windows;
+                WorkingDirrectoryPath = appSettings.PythonPaths.WorkingDirrectoryPath.Windows;
                 return;
             }
 
-            SourceCodeSavePaths = mAppSettingService.SourceCodeSavePaths.Linux;
-            InterpreterPath = mAppSettingService.PythonPaths.InterpreterPath.Linux;
-            WorkingDirrectoryPath = mAppSettingService.PythonPaths.WorkingDirrectoryPath.Linux;
+            SourceCodeSavePath = appSettings.SourceCodeSavePath.Linux;
+            InterpreterPath = appSettings.PythonPaths.InterpreterPath.Linux;
+            WorkingDirrectoryPath = appSettings.PythonPaths.WorkingDirrectoryPath.Linux;
         }
 
         private void SaveCodeAndStartProcess(string code, bool withDebug)
         {
-            File.WriteAllText(SourceCodeSavePaths, code);
+            File.WriteAllText(SourceCodeSavePath, code);
             Task.Run(() => StartProcess(withDebug: withDebug));
         }
 
         private void StartProcess(bool withDebug = false)
         {
-            string arg = string.Format($"-u -m {Path.GetFileNameWithoutExtension(SourceCodeSavePaths)}");
+            string arg = string.Format($"-u -m {Path.GetFileNameWithoutExtension(SourceCodeSavePath)}");
             
             if (withDebug)
-                arg = string.Format($"-u -m pdb {SourceCodeSavePaths}");
+                arg = string.Format($"-u -m pdb {SourceCodeSavePath}");
 
             ProcessStartInfo proccesInfo = new()
             {
