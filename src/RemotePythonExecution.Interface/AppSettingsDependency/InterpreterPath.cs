@@ -1,6 +1,6 @@
-﻿namespace RemotePythonExecution.Interface.IAppSettingsServiceDependency
+﻿namespace RemotePythonExecution.Interface.AppSettingsDependency
 {
-    public class SourceCodeSavePath
+    public class InterpreterPath
     {
         public string Windows { get; set; } = "";
         public string Linux { get; set; } = "";

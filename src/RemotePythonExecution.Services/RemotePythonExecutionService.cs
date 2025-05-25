@@ -7,6 +7,7 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
+using System.Net.Sockets;
 using System.Runtime.InteropServices;
 using System.Threading;
 using System.Threading.Tasks;
@@ -25,12 +26,16 @@ namespace RemotePythonExecution.Services
 
         #region Var
 
-        private readonly WatsonTcpServer mTcpServer;
+        private WatsonTcpServer mTcpServer;
         private Process mProcess;
         private bool mIsOutputEnded = false;
         private bool mIsProcessEnded = false;
         public Guid CurrentConnectionGuid;
         private bool mIsDisposed;
+
+        private string mInterpreterPath = string.Empty;
+        private string mWorkingDirrectoryPath = string.Empty;
+        private string mSourceCodeSavePath = string.Empty;
 
         #endregion
 
@@ -41,20 +46,20 @@ namespace RemotePythonExecution.Services
             mLogger = serviceProvider.GetRequiredService<ILogger<RemotePythonExecutionService>>();
             mAppSettingsMonitor = serviceProvider.GetRequiredService<IOptionsMonitor<AppSettings>>();
 
+            Ip = mAppSettingsMonitor.CurrentValue.ServerSettings.Ip;
+            Port = mAppSettingsMonitor.CurrentValue.ServerSettings.Port;
 
-            string ip = mAppSettingsMonitor.CurrentValue.ServerSettings.Ip;
-            int port = mAppSettingsMonitor.CurrentValue.ServerSettings.Port;
 
-            mTcpServer = new WatsonTcpServer(ip, port);
+            SetPath(mAppSettingsMonitor.CurrentValue);
+            //SetServerAddress(mAppSettingsMonitor.CurrentValue);
+
+            mTcpServer = new WatsonTcpServer(Ip, Port);
             mAppSettingsMonitor.OnChange(OnChangeSettings);
         
             Subscribe();
-
             mTcpServer.Start();
+            mLogger.LogInformation("Server runing on {ip}:{port}", Ip, Port);
 
-            SetPath(mAppSettingsMonitor.CurrentValue);
-
-            mLogger.LogInformation("Server runing on {ip}:{port}", ip, port);
         }
 
         #endregion
@@ -67,6 +72,7 @@ namespace RemotePythonExecution.Services
             mTcpServer.Events.ClientDisconnected += ClientDisconnected;
             mTcpServer.Events.MessageReceived += MessageReceived;
             mTcpServer.Events.ExceptionEncountered += ExceptionEncountered;
+            //mTcpServer.Events.ServerStopped += ServerStopped;
         }
 
         private void UnSubscribe()
@@ -74,15 +80,19 @@ namespace RemotePythonExecution.Services
             mTcpServer.Events.ClientConnected -= ClientConnected;
             mTcpServer.Events.ClientDisconnected -= ClientDisconnected;
             mTcpServer.Events.MessageReceived -= MessageReceived;
-            mTcpServer.Events.ExceptionEncountered -= ExceptionEncountered; 
+            mTcpServer.Events.ExceptionEncountered -= ExceptionEncountered;
+            //mTcpServer.Events.ServerStopped -= ServerStopped;
+
         }
 
         #endregion
 
         #region Events
+
         private void OnChangeSettings(AppSettings settings, string arg2)
         {
             SetPath(settings);
+            SetServerAddress(settings);
         }
 
         private void ClientConnected(object sender, ConnectionEventArgs e)
@@ -107,7 +117,16 @@ namespace RemotePythonExecution.Services
             if (e.Exception is IOException)
                 return;
 
+            if (e.Exception is SocketException)
+                return;
+
             mLogger.LogError("Error happened {errorMessage}", e.Exception);
+        }
+
+        private void ServerStopped(object sender, EventArgs e)
+        {
+            mIsOutputEnded = true;
+            mIsProcessEnded = true;
         }
 
         private void MessageReceived(object sender, MessageReceivedEventArgs e)
@@ -179,6 +198,10 @@ namespace RemotePythonExecution.Services
                     mLogger.LogDebug("{data}", e.Data);
                     mIsOutputEnded = false;
                 }
+                catch (TaskCanceledException)
+                {
+                    mLogger.LogError("Task was canceled");
+                }
                 catch (Exception exp)
                 {
                     mLogger.LogError("Catch happened {exp}", exp);
@@ -244,10 +267,8 @@ namespace RemotePythonExecution.Services
 
         #endregion
 
-
         #region Private fields
 
-        private string mInterpreterPath = string.Empty;
         private string InterpreterPath
         {
             get { return mInterpreterPath; }
@@ -264,7 +285,6 @@ namespace RemotePythonExecution.Services
             }
         }
 
-        private string mWorkingDirrectoryPath = string.Empty;
         private string WorkingDirrectoryPath
         {
             get { return mWorkingDirrectoryPath; }
@@ -280,8 +300,7 @@ namespace RemotePythonExecution.Services
                 mLogger.LogDebug("New path for {name} register with values {value}", nameof(WorkingDirrectoryPath), WorkingDirrectoryPath);
             }
         }
-
-        private string mSourceCodeSavePath = string.Empty;
+        
         private string SourceCodeSavePath
         {
             get { return mSourceCodeSavePath; }
@@ -299,8 +318,75 @@ namespace RemotePythonExecution.Services
 
         }
 
+        private string mIp = string.Empty;
+        private string Ip
+        {
+            get { return mIp; }
+            set
+            {
+                if (string.IsNullOrEmpty(value))
+                {
+                    mIp = "0.0.0.0";
+                    return;
+                }
+
+                if (value.Equals(mIp))
+                    return;
+
+                mIp = value;
+                mLogger.LogDebug("New ip for server register with values {value}", Ip);
+
+                OnServerAddressChange();
+            }
+        }
+
+
+        private int mPort;    
+
+        private int Port
+        {
+            get { return mPort; }
+            set
+            {
+                if (value.Equals(mPort))
+                    return;
+
+                mPort = value;
+                mLogger.LogDebug("New port for server register with values {value}", Port);
+
+                OnServerAddressChange();
+            }
+        }
+
         #endregion
+
         #region Private methods
+
+        private void OnServerAddressChange()
+        {
+            if (mTcpServer == null)
+                return;
+
+            if(mTcpServer.IsListening)
+            {
+                if(mTcpServer.Connections != 0)
+                {
+                    mIsOutputEnded = true;
+                    mIsProcessEnded = true;
+                    //mTcpServer.DisconnectClientsAsync();
+                }
+                    
+
+                mTcpServer.Stop();
+                UnSubscribe();
+                //mTcpServer?.Dispose();
+            }
+
+            mTcpServer = new WatsonTcpServer(Ip, Port);
+            Subscribe();
+            mTcpServer.Start();
+            mLogger.LogInformation("Server runing on {ip}:{port}", Ip, Port);
+        }
 
         private void SetPath(AppSettings appSettings)
         {
@@ -315,6 +401,12 @@ namespace RemotePythonExecution.Services
             SourceCodeSavePath = appSettings.SourceCodeSavePath.Linux;
             InterpreterPath = appSettings.PythonPaths.InterpreterPath.Linux;
             WorkingDirrectoryPath = appSettings.PythonPaths.WorkingDirrectoryPath.Linux;
+        }
+
+        private void SetServerAddress(AppSettings appSettings)
+        {
+            Ip = appSettings.ServerSettings.Ip;
+            Port = appSettings.ServerSettings.Port;
         }
 
         private void SaveCodeAndStartProcess(string code, bool withDebug)

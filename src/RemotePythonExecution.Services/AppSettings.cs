@@ -1,4 +1,4 @@
-﻿using RemotePythonExecution.Interface.IAppSettingsServiceDependency;
+﻿using RemotePythonExecution.Interface.AppSettingsDependency;
 
 namespace RemotePythonExecution.Services
 {

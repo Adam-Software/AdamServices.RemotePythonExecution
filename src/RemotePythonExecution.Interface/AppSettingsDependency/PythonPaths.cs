@@ -1,4 +1,4 @@
-﻿namespace RemotePythonExecution.Interface.IAppSettingsServiceDependency
+﻿namespace RemotePythonExecution.Interface.AppSettingsDependency
 {
     public class PythonPaths
     {
