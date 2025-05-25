@@ -49,10 +49,8 @@ namespace RemotePythonExecution.Services
             Ip = mAppSettingsMonitor.CurrentValue.ServerSettings.Ip;
             Port = mAppSettingsMonitor.CurrentValue.ServerSettings.Port;
 
-
             SetPath(mAppSettingsMonitor.CurrentValue);
-            //SetServerAddress(mAppSettingsMonitor.CurrentValue);
-
+            
             mTcpServer = new WatsonTcpServer(Ip, Port);
             mAppSettingsMonitor.OnChange(OnChangeSettings);
         
@@ -72,7 +70,6 @@ namespace RemotePythonExecution.Services
             mTcpServer.Events.ClientDisconnected += ClientDisconnected;
             mTcpServer.Events.MessageReceived += MessageReceived;
             mTcpServer.Events.ExceptionEncountered += ExceptionEncountered;
-            //mTcpServer.Events.ServerStopped += ServerStopped;
         }
 
         private void UnSubscribe()
@@ -81,8 +78,6 @@ namespace RemotePythonExecution.Services
             mTcpServer.Events.ClientDisconnected -= ClientDisconnected;
             mTcpServer.Events.MessageReceived -= MessageReceived;
             mTcpServer.Events.ExceptionEncountered -= ExceptionEncountered;
-            //mTcpServer.Events.ServerStopped -= ServerStopped;
-
         }
 
         #endregion
@@ -373,13 +368,11 @@ namespace RemotePythonExecution.Services
                 {
                     mIsOutputEnded = true;
                     mIsProcessEnded = true;
-                    //mTcpServer.DisconnectClientsAsync();
                 }
                     
 
                 mTcpServer.Stop();
                 UnSubscribe();
-                //mTcpServer?.Dispose();
             }
 
             mTcpServer = new WatsonTcpServer(Ip, Port);
