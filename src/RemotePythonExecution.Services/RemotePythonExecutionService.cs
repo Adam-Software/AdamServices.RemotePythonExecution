@@ -2,7 +2,6 @@
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
-using RemotePythonExecution.Interface;
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
@@ -173,6 +172,7 @@ namespace RemotePythonExecution.Services
                 try
                 {
                     mTcpServer.SendAsync(CurrentConnectionGuid, e.Data);
+                    mLogger.LogDebug("{data}", e.Data);
                     mIsOutputEnded = false;
                 }
                 catch (Exception exp)
@@ -191,11 +191,11 @@ namespace RemotePythonExecution.Services
                 {
                     await mTcpServer.SendAsync(CurrentConnectionGuid, e.Data, start: 0);
                     mLogger.LogDebug("{data}", e.Data);
-                    mIsOutputEnded = false;
                 }
                 catch (TaskCanceledException)
                 {
                     mLogger.LogError("Task was canceled");
+                    mIsOutputEnded = true;
                 }
                 catch (Exception exp)
                 {
@@ -206,6 +206,7 @@ namespace RemotePythonExecution.Services
             else
             {
                 mLogger.LogDebug("Output ended happened");
+                await Task.Delay(100);
                 mIsOutputEnded = true;
             }
         }
@@ -369,8 +370,7 @@ namespace RemotePythonExecution.Services
                     mIsOutputEnded = true;
                     mIsProcessEnded = true;
                 }
-                    
-
+                
                 mTcpServer.Stop();
                 UnSubscribe();
             }
@@ -410,8 +410,8 @@ namespace RemotePythonExecution.Services
 
         private void StartProcess(bool withDebug = false)
         {
-            string arg = string.Format($"-u -m {Path.GetFileNameWithoutExtension(SourceCodeSavePath)}");
-            
+            string arg = string.Format($"-u {SourceCodeSavePath}");
+
             if (withDebug)
                 arg = string.Format($"-u -m pdb {SourceCodeSavePath}");
 
