@@ -3,13 +3,16 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using System;
+using System.Collections;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.Net.Sockets;
 using System.Runtime.InteropServices;
+using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
+using UtfUnknown;
 using WatsonTcp;
 
 namespace RemotePythonExecution.Services
@@ -185,6 +188,7 @@ namespace RemotePythonExecution.Services
 
         private async void ProcessOutputDataReceived(object sender, DataReceivedEventArgs e)
         {
+      
             if (!(e.Data == null))
             {
                 try
@@ -404,16 +408,18 @@ namespace RemotePythonExecution.Services
 
         private void SaveCodeAndStartProcess(string code, bool withDebug)
         {
-            File.WriteAllText(SourceCodeSavePath, code);
+            Encoding utf8WithoutBom = new UTF8Encoding(false);
+            File.WriteAllText(SourceCodeSavePath, code, utf8WithoutBom);
             Task.Run(() => StartProcess(withDebug: withDebug));
         }
 
         private void StartProcess(bool withDebug = false)
         {
-            string arg = string.Format($"-u {SourceCodeSavePath}");
+            Encoding utf8WithoutBom = new UTF8Encoding(false);
+            string arg = string.Format($"-u -X utf8 {SourceCodeSavePath}");
 
             if (withDebug)
-                arg = string.Format($"-u -m pdb {SourceCodeSavePath}");
+                arg = string.Format($"-u -X utf8 -m pdb {SourceCodeSavePath}");
 
             ProcessStartInfo proccesInfo = new()
             {
@@ -425,6 +431,9 @@ namespace RemotePythonExecution.Services
                 RedirectStandardOutput = true,
                 RedirectStandardError = true,
                 RedirectStandardInput = true,
+                StandardErrorEncoding = utf8WithoutBom,
+                StandardInputEncoding = utf8WithoutBom,
+                StandardOutputEncoding = utf8WithoutBom
             };
 
             mProcess = new()
