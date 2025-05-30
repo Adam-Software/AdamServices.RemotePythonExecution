@@ -3,18 +3,19 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
-using RemotePythonExecution.Interface;
 using RemotePythonExecution.Services;
 using Serilog;
 using Serilog.Core;
 using ServiceFileCreator.Extensions;
 using ServiceFileCreator.Model;
+using System;
 using System.Threading.Tasks;
 
 namespace RemotePythonExecution
 {
     internal class Program
     {
+
         static async Task Main(string[] args)
         {
             IHost host = Host.CreateDefaultBuilder(args)
@@ -41,6 +42,12 @@ namespace RemotePythonExecution
                         loggingBuilder.AddSerilog(logger, dispose: true);
                     });
 
+                    services.Configure<HostOptions>(option =>
+                    {
+                        option.BackgroundServiceExceptionBehavior = BackgroundServiceExceptionBehavior.StopHost;
+                        option.ShutdownTimeout = TimeSpan.FromSeconds(5);
+                    });
+
                     services.AddAdamServiceFileCreator();
                     services.AddHostedService<RemotePythonExecutionService>();
                 })
@@ -49,6 +56,7 @@ namespace RemotePythonExecution
             host.UseAdamServiceFileCreator(projectType: ProjectType.DotnetProject);
             await host.ParseAndRunAsync();
 
+     
         }
     }
 }
