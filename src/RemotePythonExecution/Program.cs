@@ -42,11 +42,11 @@ namespace RemotePythonExecution
                         loggingBuilder.AddSerilog(logger, dispose: true);
                     });
 
-                    services.Configure<HostOptions>(option =>
+                    /*services.Configure<HostOptions>(option =>
                     {
                         option.BackgroundServiceExceptionBehavior = BackgroundServiceExceptionBehavior.StopHost;
                         option.ShutdownTimeout = TimeSpan.FromSeconds(5);
-                    });
+                    });*/
 
                     services.AddAdamServiceFileCreator();
                     services.AddHostedService<RemotePythonExecutionService>();
