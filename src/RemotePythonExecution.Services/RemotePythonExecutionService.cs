@@ -3,16 +3,19 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using RemotePythonExecution.Interface.RemotePythonExecutionServiceDependency.JsonModel;
+using SimpleUdp;
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
+using System.Linq;
 using System.Net.Sockets;
 using System.Runtime.InteropServices;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using WatsonTcp;
+using static System.Runtime.InteropServices.JavaScript.JSType;
 
 namespace RemotePythonExecution.Services
 {
@@ -30,7 +33,10 @@ namespace RemotePythonExecution.Services
 
         private WatsonTcpServer mTcpServer;
         private Process mProcess;
-        public Guid CurrentConnectionGuid;
+        //private Guid CurrentConnectionGuid;
+        private UdpEndpoint mUdpEndpoint;
+        private (Guid Guid, string ip) mCurrentClientParam;
+
         private bool mIsDisposed;
 
         private string mInterpreterPath = string.Empty;
@@ -40,6 +46,7 @@ namespace RemotePythonExecution.Services
         private bool mIsProcessEnded = false;
         private bool mIsOutputEnded = false;
 
+        
         #endregion
 
         #region ~
@@ -56,6 +63,8 @@ namespace RemotePythonExecution.Services
             SetPath(mAppSettingsMonitor.CurrentValue);
             
             mTcpServer = new WatsonTcpServer(Ip, Port);
+            mUdpEndpoint = new UdpEndpoint(Ip, Port);
+
             mAppSettingsMonitor.OnChange(OnChangeSettings);
         
             Subscribe();
@@ -73,6 +82,7 @@ namespace RemotePythonExecution.Services
             mTcpServer.Events.ClientDisconnected += ClientDisconnected;
             mTcpServer.Events.MessageReceived += MessageReceived;
             mTcpServer.Events.ExceptionEncountered += ExceptionEncountered;
+ 
             AppDomain.CurrentDomain.ProcessExit += AppProcessExit;
 
             mAppLifetime.ApplicationStopping.Register(OnStopping);
@@ -98,9 +108,10 @@ namespace RemotePythonExecution.Services
         }
 
         private void ClientConnected(object sender, ConnectionEventArgs e)
-        {   
+        {
             mLogger.LogInformation("Client connected. Connection id: {Guid}", e.Client.Guid);
-            CurrentConnectionGuid = e.Client.Guid;
+            var ip = e.Client.IpPort.Split(':').FirstOrDefault();
+            mCurrentClientParam = (e.Client.Guid, ip);
 
             IsOutputEnded = false;
             IsProcessEnded = false;
@@ -109,7 +120,7 @@ namespace RemotePythonExecution.Services
         private void ClientDisconnected(object sender, DisconnectionEventArgs e)
         {
             mLogger.LogInformation("Client disconnected. Connection id: {Guid}", e.Client.Guid);
-
+            
             KillProcess();
             IsOutputEnded = true;
         }
@@ -119,9 +130,15 @@ namespace RemotePythonExecution.Services
             if (e.Exception is IOException)
                 return;
 
-            if (e.Exception is SocketException)
+            /*if (e.Exception is SocketException)
                 return;
 
+            if (e.Exception is OperationCanceledException)
+            {
+                mLogger.LogError("OperationCanceledException");
+                return;
+            }*/
+            
             mLogger.LogError("Error happened {errorMessage}", e.Exception);
         }
 
@@ -166,9 +183,8 @@ namespace RemotePythonExecution.Services
 
                     case "exit":
                         {
+                            mLogger.LogInformation("Exit by client request");
                             
-                            mLogger.LogDebug("Exit by client request");
-
                             KillProcess();
                             mIsOutputEnded = true;
                             break;
@@ -183,7 +199,10 @@ namespace RemotePythonExecution.Services
             {
                 try
                 {
-                    mTcpServer.SendAsync(CurrentConnectionGuid, e.Data);
+                    var data = Encoding.UTF8.GetBytes(e.Data);
+
+                    mUdpEndpoint.SendAsync(mCurrentClientParam.ip, 19000, data);
+      
                     mLogger.LogDebug("{data}", e.Data);
                     IsOutputEnded = false;
                 }
@@ -195,19 +214,30 @@ namespace RemotePythonExecution.Services
             }
         }
 
-        private async void ProcessOutputDataReceived(object sender, DataReceivedEventArgs e)
+        private void ProcessOutputDataReceived(object sender, DataReceivedEventArgs e)
         {
             if (e.Data != null)
             {
                 try
                 {
-                    await mTcpServer.SendAsync(CurrentConnectionGuid, e.Data);
+                    var data = Encoding.UTF8.GetBytes(e.Data);
+                    mUdpEndpoint.SendAsync(mCurrentClientParam.ip, 19000, data);
+
+                    
                     mLogger.LogDebug("{data}", e.Data);
                 }
                 catch (TaskCanceledException)
                 {
                     mLogger.LogError("Task was canceled");
                     IsOutputEnded = true;
+                }
+                catch (TimeoutException)
+                {
+                    mLogger.LogError("Task timeout");                    
+                }
+                catch (OperationCanceledException)
+                {
+                    mLogger.LogError("Operation canceled");
                 }
                 catch (Exception exp)
                 {
@@ -218,7 +248,7 @@ namespace RemotePythonExecution.Services
             else
             {
                 mLogger.LogDebug("Output ended happened");
-                await Task.Delay(100);
+                //await Task.Delay(100);
                 IsOutputEnded = true;
             }
         }
@@ -260,6 +290,9 @@ namespace RemotePythonExecution.Services
                     IsOutputEnded = false;
                     IsProcessEnded = false;
 
+                    /*if (mProcess == null)
+                        return;*/
+
                     ExitData exitData = new(); 
 
                     try
@@ -278,8 +311,9 @@ namespace RemotePythonExecution.Services
                                 ExitCode = mProcess.ExitCode
                             };
 
-                            mProcess.Dispose();
-                            mProcess = null;
+                            
+                            //mProcess.Dispose();
+                            //mProcess = null;
                         }
                     }
                     catch(Exception exception)
@@ -290,17 +324,24 @@ namespace RemotePythonExecution.Services
                     var exitJson = mTcpServer.SerializationHelper.SerializeJson(exitData);
                     var exitDictonary = new Dictionary<string, object>() { { "exitData", exitJson } };
                     
-                    if (mTcpServer.IsClientConnected(CurrentConnectionGuid))
+                    if (mTcpServer.IsClientConnected(mCurrentClientParam.Guid))
                     {
-                        await mTcpServer.SendAsync(CurrentConnectionGuid, string.Empty, exitDictonary, token: stoppingToken);
-                        await mTcpServer.DisconnectClientAsync(CurrentConnectionGuid, MessageStatus.Removed, true, stoppingToken);
+                        await mTcpServer.SendAsync(mCurrentClientParam.Guid, string.Empty, exitDictonary, token: stoppingToken);
+                        await mTcpServer.DisconnectClientAsync(mCurrentClientParam.Guid, MessageStatus.Removed, true, stoppingToken);
                     }
-                    
-                    CurrentConnectionGuid = Guid.Empty;
+
+                    mCurrentClientParam.Guid = Guid.Empty;
+                    mCurrentClientParam.ip = string.Empty;
                 }
             }
         }
 
+        public override Task StopAsync(CancellationToken cancellationToken)
+        {
+            mLogger.LogError("Host stopped");
+
+            return base.StopAsync(cancellationToken);
+        }
         #endregion
 
         #region Private fields
@@ -316,8 +357,6 @@ namespace RemotePythonExecution.Services
                 mIsOutputEnded = value; 
             }
         }
-
-
 
         private bool IsProcessEnded
         {
@@ -425,12 +464,15 @@ namespace RemotePythonExecution.Services
         #region Private methods
 
         private void KillProcess()
-        {
+        {   
             if(mProcess == null) 
                 return;
 
             try
             {
+                if (mProcess.HasExited)
+                    return;
+
                 mProcess.CancelErrorRead();
                 mProcess.CancelOutputRead();
 
