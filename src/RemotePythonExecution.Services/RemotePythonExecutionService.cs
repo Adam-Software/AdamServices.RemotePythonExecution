@@ -69,7 +69,7 @@ namespace RemotePythonExecution.Services
         
             Subscribe();
             mTcpServer.Start();
-            mLogger.LogInformation("Server runing on {ip}:{port}", Ip, Port);
+            mLogger.LogInformation("Servers runing on {ip}:{port}", Ip, Port);
         }
 
         #endregion
@@ -94,6 +94,7 @@ namespace RemotePythonExecution.Services
             mTcpServer.Events.ClientDisconnected -= ClientDisconnected;
             mTcpServer.Events.MessageReceived -= MessageReceived;
             mTcpServer.Events.ExceptionEncountered -= ExceptionEncountered;
+
             AppDomain.CurrentDomain.ProcessExit -= AppProcessExit;
         }
 
@@ -109,12 +110,11 @@ namespace RemotePythonExecution.Services
 
         private void ClientConnected(object sender, ConnectionEventArgs e)
         {
-            mLogger.LogInformation("Client connected. Connection id: {Guid}", e.Client.Guid);
             var ip = e.Client.IpPort.Split(':').FirstOrDefault();
             mCurrentClientParam = (e.Client.Guid, ip);
 
             IsOutputEnded = false;
-            IsProcessEnded = false;
+            mLogger.LogInformation("Client connected. Connection id: {Guid}. Client ip: {ip}", e.Client.Guid, ip);
         }
 
         private void ClientDisconnected(object sender, DisconnectionEventArgs e)
@@ -122,22 +122,19 @@ namespace RemotePythonExecution.Services
             mLogger.LogInformation("Client disconnected. Connection id: {Guid}", e.Client.Guid);
             
             KillProcess();
-            IsOutputEnded = true;
         }
 
         private void ExceptionEncountered(object sender, ExceptionEventArgs e)
         {
             if (e.Exception is IOException)
-                return;
+                mLogger.LogError("IOException");
 
             /*if (e.Exception is SocketException)
-                return;
+                return;*/
 
             if (e.Exception is OperationCanceledException)
-            {
                 mLogger.LogError("OperationCanceledException");
-                return;
-            }*/
+            
             
             mLogger.LogError("Error happened {errorMessage}", e.Exception);
         }
@@ -186,7 +183,7 @@ namespace RemotePythonExecution.Services
                             mLogger.LogInformation("Exit by client request");
                             
                             KillProcess();
-                            mIsOutputEnded = true;
+                            //IsOutputEnded = true;
                             break;
                         }
                 }
@@ -199,12 +196,11 @@ namespace RemotePythonExecution.Services
             {
                 try
                 {
-                    var data = Encoding.UTF8.GetBytes(e.Data);
-
-                    mUdpEndpoint.SendAsync(mCurrentClientParam.ip, 19000, data);
+                    //var data = Encoding.UTF8.GetBytes(e.Data);
+                    mUdpEndpoint.SendAsync(mCurrentClientParam.ip, Port, e.Data);
       
                     mLogger.LogDebug("{data}", e.Data);
-                    IsOutputEnded = false;
+                    
                 }
                 catch (Exception exp)
                 {
@@ -220,13 +216,13 @@ namespace RemotePythonExecution.Services
             {
                 try
                 {
-                    var data = Encoding.UTF8.GetBytes(e.Data);
-                    mUdpEndpoint.SendAsync(mCurrentClientParam.ip, 19000, data);
+                    //var data = Encoding.UTF8.GetBytes(e.Data);
+                    mUdpEndpoint.SendAsync(mCurrentClientParam.ip, Port, e.Data);
 
                     
                     mLogger.LogDebug("{data}", e.Data);
                 }
-                catch (TaskCanceledException)
+                /*catch (TaskCanceledException)
                 {
                     mLogger.LogError("Task was canceled");
                     IsOutputEnded = true;
@@ -238,7 +234,7 @@ namespace RemotePythonExecution.Services
                 catch (OperationCanceledException)
                 {
                     mLogger.LogError("Operation canceled");
-                }
+                }*/
                 catch (Exception exp)
                 {
                     mLogger.LogError("Catch happened {exp}", exp);
@@ -247,7 +243,7 @@ namespace RemotePythonExecution.Services
             }
             else
             {
-                mLogger.LogDebug("Output ended happened");
+                mLogger.LogInformation("Output ended happened");
                 //await Task.Delay(100);
                 IsOutputEnded = true;
             }
@@ -255,8 +251,7 @@ namespace RemotePythonExecution.Services
 
         private void ProcessExited(object sender, EventArgs e)
         {
-            mLogger.LogDebug("Process ended happened");
-            IsProcessEnded = true;
+            mLogger.LogInformation("Process ended happened");
         }
 
         private void AppProcessExit(object sender, EventArgs e)
@@ -285,13 +280,14 @@ namespace RemotePythonExecution.Services
         {
             while (!stoppingToken.IsCancellationRequested)
             {
-                while (IsOutputEnded && IsProcessEnded)
+                while (IsOutputEnded)
+                //while (IsOutputEnded && IsProcessEnded)
                 {
                     IsOutputEnded = false;
-                    IsProcessEnded = false;
+                    //IsProcessEnded = false;
 
-                    /*if (mProcess == null)
-                        return;*/
+                    //if (mProcess == null)
+                    //    return;
 
                     ExitData exitData = new(); 
 
@@ -311,8 +307,7 @@ namespace RemotePythonExecution.Services
                                 ExitCode = mProcess.ExitCode
                             };
 
-                            
-                            //mProcess.Dispose();
+                            mProcess.Dispose();
                             //mProcess = null;
                         }
                     }
@@ -326,6 +321,7 @@ namespace RemotePythonExecution.Services
                     
                     if (mTcpServer.IsClientConnected(mCurrentClientParam.Guid))
                     {
+                        mLogger.LogInformation("Send exit data");
                         await mTcpServer.SendAsync(mCurrentClientParam.Guid, string.Empty, exitDictonary, token: stoppingToken);
                         await mTcpServer.DisconnectClientAsync(mCurrentClientParam.Guid, MessageStatus.Removed, true, stoppingToken);
                     }
@@ -336,12 +332,6 @@ namespace RemotePythonExecution.Services
             }
         }
 
-        public override Task StopAsync(CancellationToken cancellationToken)
-        {
-            mLogger.LogError("Host stopped");
-
-            return base.StopAsync(cancellationToken);
-        }
         #endregion
 
         #region Private fields
@@ -358,7 +348,7 @@ namespace RemotePythonExecution.Services
             }
         }
 
-        private bool IsProcessEnded
+        /*private bool IsProcessEnded
         {
             get { return mIsProcessEnded; }
             set 
@@ -368,7 +358,7 @@ namespace RemotePythonExecution.Services
 
                 mIsProcessEnded = value; 
             }
-        }
+        }*/
 
         private string InterpreterPath
         {
@@ -416,7 +406,6 @@ namespace RemotePythonExecution.Services
                 mSourceCodeSavePath = value;
                 mLogger.LogDebug("New path for {name} register with values {value}", nameof(SourceCodeSavePath), SourceCodeSavePath);
             }
-
         }
 
         private string mIp = string.Empty;
@@ -464,9 +453,8 @@ namespace RemotePythonExecution.Services
         #region Private methods
 
         private void KillProcess()
-        {   
-            if(mProcess == null) 
-                return;
+        {
+            IsOutputEnded = true;
 
             try
             {
@@ -477,6 +465,7 @@ namespace RemotePythonExecution.Services
                 mProcess.CancelOutputRead();
 
                 mProcess.Kill(entireProcessTree: true);
+                mLogger.LogInformation("KillProcess(): {id},", mProcess.Id);
             }
             catch (Exception ex)
             {
@@ -494,17 +483,23 @@ namespace RemotePythonExecution.Services
                 if(mTcpServer.Connections != 0)
                 {
                     KillProcess();
-                    IsOutputEnded = true;
                 }
                 
                 mTcpServer.Stop();
+
+                mTcpServer.Dispose();
+                mUdpEndpoint.Dispose();
+                
                 UnSubscribe();
             }
 
             mTcpServer = new WatsonTcpServer(Ip, Port);
+            mUdpEndpoint = new UdpEndpoint(Ip, Port);
+
             Subscribe();
             mTcpServer.Start();
-            mLogger.LogInformation("Server runing on {ip}:{port}", Ip, Port);
+
+            mLogger.LogInformation("Servers runing on {ip}:{port}", Ip, Port);
         }
 
         private void SetPath(AppSettings appSettings)
@@ -561,7 +556,7 @@ namespace RemotePythonExecution.Services
             mProcess = new()
             {
                 StartInfo = proccesInfo,
-                EnableRaisingEvents = true,
+                EnableRaisingEvents = true
             };
 
             mProcess.Exited += ProcessExited;
@@ -571,7 +566,7 @@ namespace RemotePythonExecution.Services
             
             mProcess.BeginOutputReadLine();
             mProcess.BeginErrorReadLine();
-            
+
             mProcess.WaitForExit();
         }
 
@@ -584,7 +579,7 @@ namespace RemotePythonExecution.Services
                 if (disposing)
                 {
                     KillProcess();
-                    IsOutputEnded = true;
+                    //sOutputEnded = true;
 
                     UnSubscribe();
                     mTcpServer.Stop();
