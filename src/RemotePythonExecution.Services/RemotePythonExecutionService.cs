@@ -267,7 +267,7 @@ namespace RemotePythonExecution.Services
 
                     try
                     {
-                        if (mProcess.HasExited) 
+                        if ((bool) mProcess?.HasExited) 
                         {
                             exitData = new ExitData
                             {
@@ -417,11 +417,11 @@ namespace RemotePythonExecution.Services
         {
             try
             {
-                mProcess.CancelErrorRead();
-                mProcess.CancelOutputRead();
+                mProcess?.CancelErrorRead();
+                mProcess?.CancelOutputRead();
 
-                mProcess.Kill(entireProcessTree: true);
-                mLogger.LogInformation("KillProcess(): {id},", mProcess.Id);
+                mProcess?.Kill(entireProcessTree: true);
+                mLogger.LogInformation("KillProcess(): {id},", mProcess?.Id);
 
                 IsOutputEnded = true;
             }
